@@ -553,3 +553,29 @@ SELECT m.model, ROUND(AVG(m.total_return_pct), 1) AS avg_return_pct, ROUND(AVG(m
   ROUND(AVG(m.trades), 1) AS avg_trades, SUM(m.total_return_pct > bh.bh_ret) AS stocks_beating_buy_hold,
   RANK() OVER (ORDER BY AVG(m.total_return_pct) DESC) AS rank_by_return
 FROM model_eval m JOIN bh ON bh.stock = m.stock GROUP BY m.model ORDER BY rank_by_return;
+
+-- ---------------------------------------------------------------
+-- PART 4: CORPORATE-ACTION DETECTOR (finds the bonus issues automatically)
+-- ---------------------------------------------------------------
+-- 4.1 Unusual-day classifier: a one-day price ratio near 1/2, 1/3 ... (price divides by a whole number) is flagged as a split/bonus; every other big move is a market move. Volume vs its 20-day average is shown as supporting evidence (it roughly doubles on a 1:1 bonus).
+WITH m AS (
+  SELECT stock, `date`, close_price / LAG(close_price) OVER w AS price_ratio,
+         no_of_shares / AVG(no_of_shares) OVER (PARTITION BY stock ORDER BY `date` ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS volume_vs_20d
+  FROM (
+  SELECT 'Bajaj Auto' AS stock, `date`, close_price, no_of_shares FROM bajaj_auto
+  UNION ALL
+  SELECT 'Eicher Motors' AS stock, `date`, close_price, no_of_shares FROM eicher_motors
+  UNION ALL
+  SELECT 'Hero Motocorp' AS stock, `date`, close_price, no_of_shares FROM hero_motocorp
+  UNION ALL
+  SELECT 'Infosys' AS stock, `date`, close_price, no_of_shares FROM infosys
+  UNION ALL
+  SELECT 'TCS' AS stock, `date`, close_price, no_of_shares FROM tcs
+  UNION ALL
+  SELECT 'TVS Motors' AS stock, `date`, close_price, no_of_shares FROM tvs_motors
+  ) p
+  WINDOW w AS (PARTITION BY stock ORDER BY `date`)
+)
+SELECT stock, `date`, ROUND(100 * (price_ratio - 1), 1) AS pct_move, ROUND(1 / price_ratio, 2) AS implied_factor, ROUND(volume_vs_20d, 1) AS volume_vs_20d,
+  CASE WHEN price_ratio < 0.6 AND ABS(1 / price_ratio - ROUND(1 / price_ratio)) < 0.1 THEN 'Corporate action: split/bonus' ELSE 'Market move' END AS verdict
+FROM m WHERE ABS(price_ratio - 1) > 0.07 ORDER BY ABS(price_ratio - 1) DESC;

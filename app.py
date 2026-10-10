@@ -5,7 +5,7 @@ the app runs it on an in-memory SQLite copy through small compatibility shims)."
 import re, math, sqlite3, datetime, pathlib
 import json
 import pandas as pd, altair as alt, streamlit as st
-from engine import (run_sandbox, DEFAULT, GOALS, validate_profile, recommend, cagr, ann_vol, sharpe, max_drawdown,
+from engine import (run_sandbox, walk_forward, DEFAULT, GOALS, validate_profile, recommend, cagr, ann_vol, sharpe, max_drawdown,
                     var95, position_size, portfolio_curve, INPUTS, LOGIC, OUTPUT)
 
 BASE = pathlib.Path(__file__).parent
@@ -90,10 +90,24 @@ def bar(d):  # grouped bar chart with data labels
     st.altair_chart(b.mark_bar().encode(color='metric:N') + b.mark_text(dy=-6, fontSize=11).encode(text=alt.Text('value:Q', format=',.1f')), width='stretch')
 
 st.markdown('''<style>
-.tape{overflow:hidden;white-space:nowrap;background:#131a22;border:1px solid #1f2a36;border-radius:6px;padding:8px 0;margin-bottom:10px}
-.tape span{display:inline-block;padding-left:100%;animation:scroll 40s linear infinite;font-family:monospace}
-@keyframes scroll{to{transform:translateX(-100%)}} .up{color:#00c853}.dn{color:#ff5252}
-[data-testid=stMetricValue]{color:#00c853} h1,h2,h3{letter-spacing:.5px}
+.stApp{background-color:#0b0f14;background-image:linear-gradient(rgba(0,200,83,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(0,200,83,.045) 1px,transparent 1px);background-size:34px 34px}
+.block-container{padding-top:1.2rem;max-width:1250px}
+.tape{overflow:hidden;white-space:nowrap;background:#0f161e;border:1px solid #1f2a36;border-radius:8px;padding:9px 0;margin-bottom:12px;box-shadow:0 0 14px rgba(0,200,83,.12)}
+.tape span{display:inline-block;padding-left:100%;animation:scroll 40s linear infinite;font-family:monospace;font-size:14px}
+@keyframes scroll{to{transform:translateX(-100%)}} .up{color:#00e676!important}.dn{color:#ff5252!important}
+.hero{position:relative;border:1px solid #1f2a36;border-left:5px solid #00c853;border-radius:12px;padding:22px 26px;margin-bottom:14px;overflow:hidden;
+ background:linear-gradient(120deg,#0c2a1c 0%,#0f161e 55%,#0b0f14 100%)}
+.hero:after{content:"";position:absolute;inset:0;opacity:.35;background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 120' preserveAspectRatio='none'><polyline fill='none' stroke='%2300e676' stroke-width='2' points='0,100 40,92 80,96 120,70 160,78 200,55 240,62 280,40 320,48 360,30 400,44 440,22 480,30 520,12 560,18 600,6'/></svg>") right bottom/60% 100% no-repeat}
+.hero-t{font-size:30px;font-weight:800;letter-spacing:1px;color:#e6edf3;position:relative;z-index:1}.hero-t span{color:#00e676}
+.hero-s{color:#9fb0c0;margin:4px 0 12px;position:relative;z-index:1}
+.chips{position:relative;z-index:1}.chips b{display:inline-block;background:#0b0f14;border:1px solid #00c853;color:#00e676;border-radius:20px;padding:3px 12px;margin:0 8px 6px 0;font-size:12px;letter-spacing:.8px}
+[data-testid=stMetric]{background:#111a22;border:1px solid #1f2a36;border-left:3px solid #00c853;border-radius:10px;padding:10px 14px}
+[data-testid=stMetricValue]{color:#00e676}
+button[role=tab]{font-weight:600;font-size:14px} button[role=tab][aria-selected=true]{color:#00e676}
+h2,h3{border-bottom:1px solid #1f2a36;padding-bottom:4px}
+[data-testid=stDataFrame]{border:1px solid #1f2a36;border-radius:8px}
+[data-testid=stExpander]{border:1px solid #1f2a36;border-radius:8px;background:#0f161e}
+.stButton>button[kind=primary]{background:#00c853;border:0;color:#04120a;font-weight:700}
 </style>''', unsafe_allow_html=True)
 _t = q("SELECT stock, date, close_price FROM adj_prices WHERE date IN (SELECT DISTINCT date FROM adj_prices ORDER BY date DESC LIMIT 2) ORDER BY stock, date")
 _i = []
@@ -109,10 +123,9 @@ def show(i, chart=None):
     if chart is not None: chart(b['df'])
     with st.expander('Show SQL'): st.code(b['text'], language='sql')
 
-st.title('📈 NSE Stock Analysis in SQL')
-st.caption('Six NSE stocks · Jan 2015 – Jul 2018 · moving averages, golden-cross signals, data cleaning and model comparison, all in SQL')
-t0, t1, t2, t3, t4, t6, t7, t8, t5 = st.tabs(['Overview', '1 · Data quality', '2 · EDA', '3 · Advanced SQL', '4 · Model comparison',
-                                              '5 · Investor profile', '6 · Recommendations', '7 · Methodology & limits', 'SQL playground'])
+st.markdown('<div class="hero"><div class="hero-t">📈 NSE STOCK ANALYSIS <span>IN SQL</span></div><div class="hero-s">Golden-cross signals · the bonus-issue data trap · risk-scored recommendations · model comparison</div><div class="chips"><b>6 STOCKS</b><b>889 SESSIONS EACH</b><b>JAN 2015 – JUL 2018</b><b>MYSQL 8 · STREAMLIT</b><b>SQL-FIRST</b></div></div>', unsafe_allow_html=True)
+t0, t1, t2, t3, t4, t6, t7, t8, t9, t5 = st.tabs(['Overview', '1 · Data quality', '2 · EDA', '3 · Advanced SQL', '4 · Model comparison',
+                                              '5 · Investor profile', '6 · Recommendations', '7 · Methodology & limits', '8 · Time machine', 'SQL playground'])
 
 with t0:
     c = st.columns(4); c[0].metric('Stocks', 6); c[1].metric('Trading days each', 889)
@@ -134,6 +147,8 @@ with t1:
     st.header('Data preprocessing and quality audit')
     for i in ['0.1', '0.2', '0.3', '0.4']: show(i)
     show('0.6', lambda d: bar(d.set_index('stock')))
+    st.subheader('🔎 Corporate-action detector')
+    show('4.1')
     st.info('0.5 builds the cleaned view `adj_prices` (prices before each bonus issue divided by 2) that everything else uses.')
 
 with t2:
@@ -290,3 +305,19 @@ with t8:
 
 **Setup:** `pip install -r requirements.txt` then `streamlit run app.py`; tests: `pytest`. Deploy on Streamlit Community Cloud with the `data/` folder committed.""")
     st.warning(DISCLAIMER)
+
+with t9:
+    st.header('⏳ Time machine: would the recommender have worked?')
+    st.markdown("Every 63 trading days (about 3 months), starting after the first year, the recommender sees **only prices up to that day**, "
+                "picks stocks for your saved profile, and holds them until the next rebalance (0.1% cost). The benchmark is an equal-weight basket of all six. "
+                "There is no look-ahead, so this is an honest test of the recommender itself.")
+    try:
+        pwx = q('SELECT date, stock, close_price FROM adj_prices').pivot(index='date', columns='stock', values='close_price')
+        res, pk = walk_forward(pwx, S['profile']); r1, r2 = res.iloc[-1] - 1
+        k = st.columns(4); k[0].metric('Recommender', f'{100 * r1:+.1f}%'); k[1].metric('Equal-weight', f'{100 * r2:+.1f}%')
+        k[2].metric('Recommender max drawdown', f'{100 * max_drawdown(res.iloc[:, 0]):.1f}%'); k[3].metric('Equal-weight max drawdown', f'{100 * max_drawdown(res.iloc[:, 1]):.1f}%')
+        st.line_chart(res * 100); st.caption('Growth of 100, after costs. Starts after the first year of data.')
+        (st.success if r1 > r2 else st.warning)(f"The recommender {'beat' if r1 > r2 else 'trailed'} a simple equal-weight basket by {abs(100 * (r1 - r2)):.1f} percentage points. "
+            "Either way this is a finding: a rule-based score built on past risk-adjusted return is not a forecast, and 3.6 years is a short test.")
+        st.dataframe(pd.DataFrame(pk, columns=['Rebalance date', 'Stocks held']), hide_index=True, width='stretch')
+    except ValueError as ex: st.error(f'Fix your profile first: {ex}')

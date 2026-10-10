@@ -31,3 +31,9 @@ def test_sandbox():
     assert n == 3 and df.s[0] == 6
     with pytest.raises(ValueError): run_sandbox(c, 'PRAGMA table_info(a)')
     with pytest.raises(ValueError): run_sandbox(c, 'DELIMITER $$')
+def test_walk_forward_no_lookahead():
+    import numpy as np
+    idx = pd.date_range('2020-01-01', periods=400, freq='B').strftime('%Y-%m-%d')
+    pw = pd.DataFrame({s: 100 * np.cumprod(1 + np.random.default_rng(n).normal(.0004, .01, 400)) for n, s in enumerate(M.stock)}, index=idx)
+    r, picks = walk_forward(pw, {**DEFAULT, 'n_stocks': 2}, start=100, step=50)
+    assert len(r) > 200 and r.iloc[0, 0] == 1.0 and len(picks) >= 5

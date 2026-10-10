@@ -94,3 +94,22 @@ def run_sandbox(con, sql: str):
         else: con.execute(q)
         n += 1
     con.commit(); return df, n
+
+def metrics_asof(pw: pd.DataFrame, i: int):
+    """Recommender inputs using ONLY prices up to row i (no look-ahead)."""
+    h = pw.iloc[:i + 1]; r = h.pct_change().dropna(); days = (pd.Timestamp(h.index[-1]) - pd.Timestamp(h.index[0])).days
+    vol = r.std() * math.sqrt(252); cg = (h.iloc[-1] / h.iloc[0]) ** (365 / days) - 1
+    m = pd.DataFrame({'stock': h.columns, 'return_per_risk': (cg / vol).values, 'ann_vol_pct': (100 * vol).values,
+                      'max_drawdown_pct': (100 * (h / h.cummax() - 1).min()).values,
+                      'trend': (h.rolling(20).mean().iloc[-1] > h.rolling(50).mean().iloc[-1]).astype(int).values})
+    return m, r.corr()
+
+def walk_forward(pw: pd.DataFrame, profile: dict, start: int = 252, step: int = 63, cost: float = 0.001):
+    """Re-run the recommender every `step` sessions using only past data; hold until the next rebalance."""
+    dates, i = list(pw.index), start; idx, eq, bench, picks = [dates[start]], [1.0], [1.0], []
+    while i < len(dates) - 1:
+        m, c = metrics_asof(pw, i); w = recommend(profile, m, c).set_index('stock')['allocation_pct'] / 100
+        j = min(i + step, len(dates) - 1); seg = pw.iloc[i:j + 1] / pw.iloc[i]
+        eq += list(eq[-1] * (1 - cost) * (seg[w.index] * w).sum(axis=1).iloc[1:]); bench += list(bench[-1] * seg.mean(axis=1).iloc[1:])
+        idx += dates[i + 1:j + 1]; picks.append((dates[i], ', '.join(w.index))); i = j
+    return pd.DataFrame({'Recommender (past data only)': eq, 'Equal-weight, all six': bench}, index=idx), picks
