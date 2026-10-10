@@ -91,7 +91,7 @@ def bar(d):  # grouped bar chart with data labels
 
 st.markdown('''<style>
 .stApp{background-color:#0b0f14;background-image:linear-gradient(rgba(0,200,83,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(0,200,83,.045) 1px,transparent 1px);background-size:34px 34px}
-.block-container{padding-top:1.2rem;max-width:1250px}
+.block-container{padding-top:4.2rem;max-width:1250px}
 .tape{overflow:hidden;white-space:nowrap;background:#0f161e;border:1px solid #1f2a36;border-radius:8px;padding:9px 0;margin-bottom:12px;box-shadow:0 0 14px rgba(0,200,83,.12)}
 .tape span{display:inline-block;padding-left:100%;animation:scroll 40s linear infinite;font-family:monospace;font-size:14px}
 @keyframes scroll{to{transform:translateX(-100%)}} .up{color:#00e676!important}.dn{color:#ff5252!important}
