@@ -120,7 +120,12 @@ for _s, _g in _t.groupby('stock'):
 st.markdown(f"<div class=tape><span>{' &nbsp;│&nbsp; '.join(_i)}</span></div>", unsafe_allow_html=True)
 
 def show(i, chart=None):
-    b = B[i]; st.markdown(f"**{i} · {b['label']}**")
+    b = B.get(i)
+    if b is None:  # section missing from stock_advanced_analysis.sql (or it returns no rows): warn instead of crashing
+        st.warning(f"Section {i} was not found in stock_advanced_analysis.sql (or it returns no rows). "
+                   f"Available sections: {', '.join(B)}")
+        return
+    st.markdown(f"**{i} · {b['label']}**")
     if b['note']: st.caption(' '.join(b['note']))
     st.dataframe(b['df'], width='stretch', hide_index=True)
     if chart is not None: chart(b['df'])
