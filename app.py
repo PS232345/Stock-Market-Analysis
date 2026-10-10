@@ -40,11 +40,12 @@ def add_shims(con):  # MySQL functions the SQL files use, for SQLite
 
 @st.cache_resource
 def boot():
-    missing = [f'{f}.csv' for f in FILES if not (BASE/'data'/f'{f}.csv').exists()]
+    idx = {re.sub(r'[ \-]+', '_', p.stem.lower()): p for p in BASE.rglob('*') if p.suffix.lower() == '.csv'}  # find CSVs anywhere in the repo, any capitalisation
+    missing = [f'{f}.csv' for f in FILES if f.lower() not in idx]
     if missing: return None, missing, []
     con = sqlite3.connect(':memory:', check_same_thread=False)
     for f,(t,_) in FILES.items():
-        d = pd.read_csv(BASE/'data'/f'{f}.csv'); d.columns = COLS
+        d = pd.read_csv(idx[f.lower()]); d.columns = COLS
         d['date'] = pd.to_datetime(d['date'], format='%d-%B-%Y').dt.strftime('%Y-%m-%d')
         d.sort_values('date').to_sql(t, con, index=False)
     add_shims(con)
