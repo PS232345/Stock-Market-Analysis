@@ -5,7 +5,7 @@ the app runs it on an in-memory SQLite copy through small compatibility shims)."
 import re, math, sqlite3, datetime, pathlib
 import json
 import pandas as pd, altair as alt, streamlit as st
-from engine import (run_sandbox, walk_forward, DEFAULT, GOALS, validate_profile, recommend, cagr, ann_vol, sharpe, max_drawdown,
+from engine import (SECTORS, run_sandbox, walk_forward, DEFAULT, GOALS, validate_profile, recommend, cagr, ann_vol, sharpe, max_drawdown,
                     var95, position_size, portfolio_curve, INPUTS, LOGIC, OUTPUT)
 
 BASE = pathlib.Path(__file__).parent
@@ -107,6 +107,9 @@ button[role=tab]{font-weight:600;font-size:14px} button[role=tab][aria-selected=
 h2,h3{border-bottom:1px solid #1f2a36;padding-bottom:4px}
 [data-testid=stDataFrame]{border:1px solid #1f2a36;border-radius:8px}
 [data-testid=stExpander]{border:1px solid #1f2a36;border-radius:8px;background:#0f161e}
+.badge{font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;letter-spacing:.8px;vertical-align:middle}
+.bu{background:#003d1f;color:#00e676;border:1px solid #00c853}.se{background:#3d0f0f;color:#ff5252;border:1px solid #ff5252}
+.px{font-size:26px;font-weight:700;font-family:monospace;margin-top:2px}.px small{font-size:13px}.sub{color:#9fb0c0;font-size:12px;margin-bottom:-6px}
 .stButton>button[kind=primary]{background:#00c853;border:0;color:#04120a;font-weight:700}
 </style>''', unsafe_allow_html=True)
 _t = q("SELECT stock, date, close_price FROM adj_prices WHERE date IN (SELECT DISTINCT date FROM adj_prices ORDER BY date DESC LIMIT 2) ORDER BY stock, date")
@@ -130,6 +133,16 @@ t0, t1, t2, t3, t4, t6, t7, t8, t9, t5 = st.tabs(['Overview', '1 · Data quality
 with t0:
     c = st.columns(4); c[0].metric('Stocks', 6); c[1].metric('Trading days each', 889)
     c[2].metric('From', '2015-01-01'); c[3].metric('To', '2018-07-31')
+    st.subheader('Market snapshot')
+    pwo = q('SELECT date, stock, close_price FROM adj_prices').pivot(index='date', columns='stock', values='close_price')
+    trd = q("SELECT stock, pos FROM model_pos WHERE model = 'MA 20/50' AND date = (SELECT MAX(date) FROM model_pos)").set_index('stock')['pos']
+    cc = st.columns(3)
+    for n_, nm_ in enumerate(NAMES):
+        s_ = pwo[nm_]; d_ = s_.iloc[-1] / s_.iloc[-2] - 1; up_ = trd[nm_] == 1; col_ = '#00e676' if s_.iloc[-1] >= s_.iloc[-250] else '#ff5252'
+        with cc[n_ % 3].container(border=True):
+            st.markdown(f"<b>{nm_}</b><span class='badge {'bu' if up_ else 'se'}'>{'UPTREND' if up_ else 'DOWNTREND'}</span><div class=px>{s_.iloc[-1]:,.2f} <small class={'up' if d_ >= 0 else 'dn'}>{'▲' if d_ >= 0 else '▼'} {abs(d_) * 100:.2f}%</small></div><div class=sub>{SECTORS[nm_]} · {100 * (s_.iloc[-1] / s_.iloc[0] - 1):+.1f}% since Jan 2015 (adjusted)</div>", unsafe_allow_html=True)
+            sp_ = s_.iloc[-250:].reset_index(); sp_.columns = ['date', 'v']
+            st.altair_chart(alt.Chart(sp_).mark_area(line={'color': col_}, color=col_, opacity=.22).encode(x=alt.X('date:T', axis=None), y=alt.Y('v:Q', axis=None, scale=alt.Scale(zero=False))).properties(height=70), width='stretch')
     st.subheader('Business problem')
     st.write("A retail investor wants rule-based Buy/Sell signals for six NSE stocks they can trust. Raw prices hide non-economic jumps "
              "(bonus issues), which distort returns, moving averages and signals, so the data must be validated before any signal is believed.")
@@ -161,6 +174,17 @@ with t2:
     k = q(f"SELECT date, open_price o, high_price h, low_price l, close_price c FROM {[t for t, n in FILES.values() if n == cs][0]} ORDER BY date DESC LIMIT 120")
     k['date'] = pd.to_datetime(k['date']); cb = alt.Chart(k).encode(x='date:T', color=alt.condition('datum.c >= datum.o', alt.value('#00c853'), alt.value('#ff5252')))
     st.altair_chart(cb.mark_rule().encode(y=alt.Y('l:Q', scale=alt.Scale(zero=False), title='Price'), y2='h:Q') + cb.mark_bar(size=4).encode(y='o:Q', y2='c:Q'), width='stretch')
+    st.subheader('🫧 Risk vs return map (bubble size = return per unit of risk)')
+    bd = B['1.3']['df'].copy(); bd['sector'] = bd['stock'].map(SECTORS)
+    bb = alt.Chart(bd).encode(x=alt.X('ann_vol_pct:Q', scale=alt.Scale(zero=False), title='Annual volatility %'), y=alt.Y('cagr_pct:Q', title='CAGR %'))
+    st.altair_chart(bb.mark_circle(opacity=.8).encode(size=alt.Size('return_per_risk:Q', scale=alt.Scale(range=[400, 2200]), legend=None), color=alt.Color('sector:N', scale=alt.Scale(range=['#00e676', '#40c4ff'])), tooltip=['stock', 'cagr_pct', 'ann_vol_pct', 'return_per_risk'])
+                    + bb.mark_text(dy=-26, color='white').encode(text='stock:N'), width='stretch')
+    st.subheader('🗓️ Yearly return heatmap (%)')
+    hm = B['1.2']['df'].melt('stock', var_name='year', value_name='ret'); hm['year'] = hm['year'].str[1:]
+    hc = alt.Chart(hm).encode(x=alt.X('year:O', title=None), y=alt.Y('stock:N', title=None))
+    st.altair_chart(hc.mark_rect().encode(color=alt.Color('ret:Q', scale=alt.Scale(scheme='redyellowgreen', domain=[-35, 35]), legend=None)) + hc.mark_text(fontSize=13).encode(text=alt.Text('ret:Q', format='+.1f'), color=alt.value('black')), width='stretch')
+    st.subheader('📉 Underwater chart: how far each stock sat below its peak (%)')
+    st.line_chart(((pwo / pwo.cummax() - 1) * 100))
     show('1.1'); show('1.2')
     show('1.3', lambda d: bar(d.set_index('stock')[['cagr_pct', 'ann_vol_pct']]))
     show('1.4', lambda d: bar(d.set_index('stock')['max_drawdown_pct']))
